@@ -8,7 +8,10 @@ object CurveGenerator {
         val pts = path.points
         val polygon = path.optimalPolygon
         val n = polygon.size
-        if (n < 2) return
+        if (n < 3) {
+            path.curveSegments = emptyList()
+            return
+        }
 
         val dpts = polygon.map { DPoint(pts[it].x.toDouble(), pts[it].y.toDouble()) }
         val segments = mutableListOf<CurveSegment>()
