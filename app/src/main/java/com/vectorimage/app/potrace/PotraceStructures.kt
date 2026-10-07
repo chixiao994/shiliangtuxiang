@@ -44,11 +44,13 @@ data class Sum(
 }
 
 data class PotraceParams(
-    val turdSize: Int = 2,
+    val turdSize: Int = 6,                 // 过滤小轮廓（面积 < turdSize 的丢弃）
     val turnPolicy: TurnPolicy = TurnPolicy.MINORITY,
     val alphaMax: Double = 1.0,
     val optimizeCurve: Boolean = true,
-    val optTolerance: Double = 0.2
+    val optTolerance: Double = 0.2,
+    val morphCloseRadius: Int = 2,         // 形态学闭运算半径（填充笔画内部小洞）
+    val polygonEpsilon: Double = 1.2       // 多边形拟合最大允许的平均垂直距离（像素）
 )
 
 enum class TurnPolicy { BLACK, WHITE, LEFT, RIGHT, MINORITY, MAJORITY, RANDOM }
