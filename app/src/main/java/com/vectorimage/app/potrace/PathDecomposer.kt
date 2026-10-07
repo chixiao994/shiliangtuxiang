@@ -2,7 +2,7 @@ package com.vectorimage.app.potrace
 
 object PathDecomposer {
 
-    // 方向: 0=E, 1=S, 2=W, 3=N
+    // 方向: 0=东(+1,0), 1=南(0,+1), 2=西(-1,0), 3=北(0,-1)
     private val DX = intArrayOf(1, 0, -1, 0)
     private val DY = intArrayOf(0, 1, 0, -1)
 
@@ -11,71 +11,65 @@ object PathDecomposer {
         w: Int, h: Int,
         params: PotraceParams
     ): List<PotracePath> {
-        val visited = BooleanArray(w * h)
         val paths = mutableListOf<PotracePath>()
 
-        // 1. 外轮廓：从每个前景连通分量的最左上点开始
+        // 1. 外轮廓：从每个前景连通分量的最左上像素开始
         for (y in 0 until h) {
             for (x in 0 until w) {
                 val idx = y * w + x
-                if (!binary[idx] || visited[idx]) continue
-                val upFg = y > 0 && binary[(y - 1) * w + x]
-                val leftFg = x > 0 && binary[y * w + x - 1]
-                if (upFg || leftFg) continue
+                if (!binary[idx]) continue
+                if (x > 0 && binary[y * w + x - 1]) continue
+                if (y > 0 && binary[(y - 1) * w + x]) continue
 
-                val path = tracePath(binary, w, h, x, y, visited, traceHole = false)
-                if (path != null && path.points.size >= 4) paths.add(path)
+                val points = traceContour(binary, w, h, x, y, isHole = false)
+                if (points != null && points.size >= 3) {
+                    val path = PotracePath(points)
+                    path.area = computeArea(points)
+                    paths.add(path)
+                }
             }
         }
 
-        // 2. 孔洞轮廓：从每个背景连通分量的最左上点开始
-        val holeVisited = BooleanArray(w * h)
-        for (y in 0 until h) {
-            for (x in 0 until w) {
+        // 2. 孔洞轮廓：从每个背景连通分量的最左上像素开始
+        for (y in 1 until h - 1) {
+            for (x in 1 until w - 1) {
                 val idx = y * w + x
-                if (binary[idx] || holeVisited[idx]) continue
-                val upBg = y == 0 || !binary[(y - 1) * w + x]
-                val leftBg = x == 0 || !binary[y * w + x - 1]
-                if (!upBg || !leftBg) continue
-                // 排除图像边界上的背景（不是孔洞）
-                if (x == 0 || y == 0 || x == w - 1 || y == h - 1) continue
+                if (binary[idx]) continue
+                if (binary[y * w + x - 1]) continue
+                if (binary[(y - 1) * w + x]) continue
 
-                val path = tracePath(binary, w, h, x, y, holeVisited, traceHole = true)
-                if (path != null && path.points.size >= 4) paths.add(path)
+                val points = traceContour(binary, w, h, x, y, isHole = true)
+                if (points != null && points.size >= 3) {
+                    val path = PotracePath(points)
+                    path.area = computeArea(points)
+                    paths.add(path)
+                }
             }
         }
 
         return paths
     }
 
-    /**
-     * 角点追踪：沿像素边界走，每一步记录一个角点 (x, y)。
-     * traceHole=true 时追踪的是「背景区域」的轮廓（即孔洞）。
-     */
-    private fun tracePath(
+    private fun traceContour(
         binary: BooleanArray, w: Int, h: Int,
-        startX: Int, startY: Int,
-        visited: BooleanArray,
-        traceHole: Boolean
-    ): PotracePath? {
+        startX: Int, startY: Int, isHole: Boolean
+    ): List<IntPoint>? {
         val points = mutableListOf<IntPoint>()
         var x = startX
         var y = startY
         var dir = 0
-        val maxSteps = (w * h * 8).coerceAtLeast(1024)
-        var guard = 0
+        val startDir = 0
+        val maxSteps = (w + h) * 4 + 1024
+        var steps = 0
 
-        points.add(IntPoint(x, y))
-        if (traceHole) visited[y * w + x] = true
-
-        while (guard < maxSteps) {
-            guard++
+        do {
+            points.add(IntPoint(x, y))
 
             // 优先级：直行 > 左转 > 右转
-            val candidates = intArrayOf(dir, (dir + 3) % 4, (dir + 1) % 4)
+            val tryDirs = intArrayOf(dir, (dir + 3) % 4, (dir + 1) % 4)
             var moved = false
-            for (d in candidates) {
-                if (canMove(binary, w, h, x, y, d, traceHole)) {
+            for (d in tryDirs) {
+                if (canMove(binary, w, h, x, y, d, isHole)) {
                     x += DX[d]
                     y += DY[d]
                     dir = d
@@ -83,54 +77,53 @@ object PathDecomposer {
                     break
                 }
             }
-            if (!moved) break
+            if (!moved) return null
 
-            if (x == startX && y == startY) break
+            steps++
+            if (steps > maxSteps) return null
+        } while (!(x == startX && y == startY && dir == startDir))
 
-            points.add(IntPoint(x, y))
-            if (!traceHole) {
-                if (x in 0 until w && y in 0 until h) {
-                    // 只标记起点像素，避免把整个连通分量都标记（因为轮廓可能穿过多个像素）
-                }
-            }
-        }
-
-        if (points.size < 4) return null
-        val path = PotracePath(points)
-        path.area = computeArea(points)
-        return path
+        return if (points.size >= 3) points else null
     }
 
     /**
-     * 检查沿方向 d 从 (x, y) 到下一个角点是否在边界上。
-     * traceHole=true 时边界判定相反（前景在右侧）。
+     * 检查从格点 (x, y) 沿方向 d 移动是否合法。
+     * 移动后的格点为 (x+DX[d], y+DY[d])。
+     *
+     * 移动路径两侧的像素（按行进方向的左手/右手）：
+     *   d=0（东）: 左=(x, y-1), 右=(x, y)
+     *   d=1（南）: 左=(x, y),   右=(x-1, y)
+     *   d=2（西）: 左=(x-1, y), 右=(x-1, y-1)
+     *   d=3（北）: 左=(x-1, y-1), 右=(x, y-1)
      */
     private fun canMove(
         binary: BooleanArray, w: Int, h: Int,
-        x: Int, y: Int, d: Int, traceHole: Boolean
+        x: Int, y: Int, d: Int, isHole: Boolean
     ): Boolean {
-        val s1x: Int; val s1y: Int; val s2x: Int; val s2y: Int
+        val nx = x + DX[d]
+        val ny = y + DY[d]
+        if (nx < 0 || nx > w || ny < 0 || ny > h) return false
+
+        val lx: Int; val ly: Int; val rx: Int; val ry: Int
         when (d) {
-            0 -> { s1x = x; s1y = y - 1; s2x = x; s2y = y }
-            1 -> { s1x = x - 1; s1y = y; s2x = x; s2y = y }
-            2 -> { s1x = x - 1; s1y = y - 1; s2x = x - 1; s2y = y }
-            3 -> { s1x = x - 1; s1y = y - 1; s2x = x; s2y = y - 1 }
+            0 -> { lx = x; ly = y - 1; rx = x; ry = y }
+            1 -> { lx = x; ly = y; rx = x - 1; ry = y }
+            2 -> { lx = x - 1; ly = y; rx = x - 1; ry = y - 1 }
+            3 -> { lx = x - 1; ly = y - 1; rx = x; ry = y - 1 }
             else -> return false
         }
-        val fg1 = inBounds(s1x, s1y, w, h) && binary[s1y * w + s1x]
-        val fg2 = inBounds(s2x, s2y, w, h) && binary[s2y * w + s2x]
-        return if (traceHole) {
-            // 孔洞：背景在左，前景在右
-            fg1 == fg2 || !(fg1 || fg2)
-                .let { false } // 这里简化为仍然是一前景一背景
-                .or(fg1 != fg2)
+
+        val leftFg = lx in 0 until w && ly in 0 until h && binary[ly * w + lx]
+        val rightFg = rx in 0 until w && ry in 0 until h && binary[ry * w + rx]
+
+        return if (isHole) {
+            // 孔洞: 左=前景, 右=背景
+            leftFg && !rightFg
         } else {
-            fg1 != fg2
+            // 外轮廓: 左=背景, 右=前景
+            !leftFg && rightFg
         }
     }
-
-    private fun inBounds(x: Int, y: Int, w: Int, h: Int) =
-        x in 0 until w && y in 0 until h
 
     private fun computeArea(points: List<IntPoint>): Long {
         var area = 0L
