@@ -6,7 +6,6 @@
     android:background="#F5F6FA"
     android:padding="12dp">
 
-    <!-- 顶部：输入 / 输出 / 保存 -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -38,7 +37,6 @@
             android:text="保存" />
     </LinearLayout>
 
-    <!-- 状态文字 -->
     <TextView
         android:id="@+id/status_text"
         android:layout_width="match_parent"
@@ -48,8 +46,7 @@
         android:textColor="#5A6478"
         android:textSize="13sp" />
 
-    <!-- 中间：SVG 预览 -->
-    <com.vectorimage.app.SvgPreviewView
+    <com.vectorimage.app.PotracePreviewView
         android:id="@+id/preview_view"
         android:layout_width="match_parent"
         android:layout_height="0dp"
@@ -58,7 +55,6 @@
         android:layout_marginBottom="8dp"
         android:background="#FFFFFF" />
 
-    <!-- 底部：上一张 / 跳过 / 下一张 -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
