@@ -93,7 +93,12 @@ class MainActivity : AppCompatActivity() {
         statusText.text = "正在读取文件夹…"
 
         lifecycleScope.launch {
-            val pairs = withContext(Dispatchers.IO) { listImages(uri) }
+            val pairs = try {
+                withContext(Dispatchers.IO) { listImages(uri) }
+            } catch (e: Exception) {
+                statusText.text = "读取失败：${e.message}"
+                busy = false; updateNav(); return@launch
+            }
             imageUris.clear(); imageNames.clear()
             pairs.forEach { (u, n) -> imageUris.add(u); imageNames.add(n) }
             currentIndex = 0; skipped.clear(); busy = false
@@ -129,11 +134,11 @@ class MainActivity : AppCompatActivity() {
             ), null, null, null
         )?.use { c ->
             while (c.moveToNext()) {
-                val id = c.getString(0)
+                val id = c.getString(0) ?: continue
                 val mime = c.getString(1) ?: ""
                 val name = c.getString(2) ?: "image"
                 if (mime == DocumentsContract.Document.MIME_TYPE_DIR) {
-                    scanFolder(treeUri, id, out)
+                    try { scanFolder(treeUri, id, out) } catch (_: Exception) {}
                 } else if (mime.startsWith("image/")) {
                     out.add(DocumentsContract.buildDocumentUriUsingTree(treeUri, id) to name)
                 }
@@ -144,6 +149,7 @@ class MainActivity : AppCompatActivity() {
     private fun renderCurrent() {
         if (imageUris.isEmpty()) return
         val idx = currentIndex
+        if (idx !in imageUris.indices) return
         val uri = imageUris[idx]
         val name = imageNames.getOrNull(idx) ?: "image"
 
@@ -165,21 +171,22 @@ class MainActivity : AppCompatActivity() {
                         maxDim.toFloat() / bmp.height,
                         1f
                     )
-                    val scaled = Bitmap.createScaledBitmap(
-                        bmp,
-                        (bmp.width * scale).toInt().coerceAtLeast(1),
-                        (bmp.height * scale).toInt().coerceAtLeast(1),
-                        true
-                    )
-                    val paths = Potrace.trace(scaled, PotraceParams())
-                    bmp.recycle()
-                    scaled.recycle()
-                    Triple(paths, scaled.width, scaled.height)
+                    val sw = (bmp.width * scale).toInt().coerceAtLeast(1)
+                    val sh = (bmp.height * scale).toInt().coerceAtLeast(1)
+                    val scaled = Bitmap.createScaledBitmap(bmp, sw, sh, true)
+                    val paths = try {
+                        Potrace.trace(scaled, PotraceParams())
+                    } finally {
+                        bmp.recycle()
+                        scaled.recycle()
+                    }
+                    Triple(paths, sw, sh)
                 }
                 val (paths, w, h) = result
                 previewView.setPaths(paths, w, h)
                 statusText.text = "预览：$name（${idx + 1}/${imageUris.size}）"
             } catch (e: Exception) {
+                e.printStackTrace()
                 previewView.clear()
                 statusText.text = "处理失败：${e.message}"
             }
@@ -226,17 +233,16 @@ class MainActivity : AppCompatActivity() {
                             maxDim.toFloat() / bmp.height,
                             1f
                         )
-                        val scaled = Bitmap.createScaledBitmap(
-                            bmp,
-                            (bmp.width * scale).toInt().coerceAtLeast(1),
-                            (bmp.height * scale).toInt().coerceAtLeast(1),
-                            true
-                        )
-                        val paths = Potrace.trace(scaled, PotraceParams())
-                        val out = SvgWriter.toSvg(paths, scaled.width, scaled.height)
-                        bmp.recycle()
-                        scaled.recycle()
-                        out
+                        val sw = (bmp.width * scale).toInt().coerceAtLeast(1)
+                        val sh = (bmp.height * scale).toInt().coerceAtLeast(1)
+                        val scaled = Bitmap.createScaledBitmap(bmp, sw, sh, true)
+                        try {
+                            val paths = Potrace.trace(scaled, PotraceParams())
+                            SvgWriter.toSvg(paths, sw, sh)
+                        } finally {
+                            bmp.recycle()
+                            scaled.recycle()
+                        }
                     }
                     val outName = name.substringBeforeLast('.', name) + ".svg"
                     withContext(Dispatchers.IO) { writeToOutputTree(outName, svg) }
@@ -264,6 +270,9 @@ class MainActivity : AppCompatActivity() {
     private fun loadBitmap(uri: Uri): Bitmap {
         val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, opts) }
+        if (opts.outWidth <= 0 || opts.outHeight <= 0) {
+            throw IllegalStateException("无法读取图片尺寸")
+        }
         val maxDim = 1024
         var sample = 1
         while (opts.outWidth / sample > maxDim || opts.outHeight / sample > maxDim) sample *= 2
