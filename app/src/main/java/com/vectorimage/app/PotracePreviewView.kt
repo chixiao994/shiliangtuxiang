@@ -51,33 +51,39 @@ class PotracePreviewView @JvmOverloads constructor(
         canvas.translate(dx, dy)
         canvas.scale(scale, scale)
 
+        // 所有轮廓合并到一个 Path 里，用 EVEN_ODD 规则填充，孔洞会被正确扣除
+        val combined = Path()
+        combined.fillType = Path.FillType.EVEN_ODD
+
         for (p in paths) {
             val segments = if (p.optimizedSegments.isNotEmpty()) p.optimizedSegments
             else p.curveSegments
             if (segments.isEmpty()) continue
-            val path = Path()
+
             val first = segments.first()
             val start = if (first.tag == SegmentTag.CORNER) first.c[1] else first.c[0]
-            path.moveTo(start.x.toFloat(), start.y.toFloat())
+            combined.moveTo(start.x.toFloat(), start.y.toFloat())
+
             for (seg in segments) {
                 when (seg.tag) {
                     SegmentTag.CORNER -> {
                         val v = seg.c[1]
-                        path.lineTo(v.x.toFloat(), v.y.toFloat())
+                        combined.lineTo(v.x.toFloat(), v.y.toFloat())
                     }
                     SegmentTag.CURVETO -> {
                         val ctrl = seg.c[1]
                         val end = seg.c[2]
-                        path.quadTo(
+                        combined.quadTo(
                             ctrl.x.toFloat(), ctrl.y.toFloat(),
                             end.x.toFloat(), end.y.toFloat()
                         )
                     }
                 }
             }
-            path.close()
-            canvas.drawPath(path, fillPaint)
+            combined.close()
         }
+
+        canvas.drawPath(combined, fillPaint)
         canvas.restore()
     }
 }
