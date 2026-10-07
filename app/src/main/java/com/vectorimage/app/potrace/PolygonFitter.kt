@@ -1,8 +1,6 @@
 package com.vectorimage.app.potrace
 
 import kotlin.math.abs
-import kotlin.math.max
-import kotlin.math.min
 
 object PolygonFitter {
 
@@ -74,7 +72,9 @@ object PolygonFitter {
         val pts = path.points
         val n = pts.size
         val sums = path.sums
+        if (n < 3) return emptyList()
 
+        // 起点：最左边的点
         var start = 0
         for (i in 1 until n) if (pts[i].x < pts[start].x) start = i
 
@@ -82,11 +82,19 @@ object PolygonFitter {
         var current = start
         polygon.add(current)
 
-        while (true) {
-            var bestNext = (current + 1) % n
+        var iter = 0
+        val maxIter = n + 4  // 防止死循环
+
+        while (iter < maxIter) {
+            iter++
+
+            var bestNext = -1
             var bestPenalty = Double.MAX_VALUE
+
             var next = (current + 2) % n
-            while (next != current) {
+            var stepCount = 0
+            while (next != current && stepCount < n) {
+                stepCount++
                 val p = penalty(pts, sums, current, next)
                 if (p < bestPenalty) {
                     bestPenalty = p
@@ -94,10 +102,12 @@ object PolygonFitter {
                 }
                 next = (next + 1) % n
             }
-            if (bestNext == start) break
+
+            if (bestNext == -1 || bestNext == start) break
             polygon.add(bestNext)
             current = bestNext
         }
+
         return polygon
     }
 }
