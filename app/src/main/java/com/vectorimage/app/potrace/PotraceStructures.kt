@@ -28,19 +28,9 @@ data class CurveSegment(
 
 class PotracePath(val points: List<IntPoint>) {
     var area = 0L
-    var lon: IntArray = IntArray(0)
-    var sums: List<Sum> = emptyList()
     var optimalPolygon: List<Int> = emptyList()
     var curveSegments: List<CurveSegment> = emptyList()
     var optimizedSegments: List<CurveSegment> = emptyList()
-}
-
-data class Sum(
-    val x: Double, val y: Double,
-    val x2: Double, val xy: Double, val y2: Double
-) {
-    operator fun plus(o: Sum) = Sum(x + o.x, y + o.y, x2 + o.x2, xy + o.xy, y2 + o.y2)
-    operator fun minus(o: Sum) = Sum(x - o.x, y - o.y, x2 - o.x2, xy - o.xy, y2 - o.y2)
 }
 
 data class PotraceParams(
@@ -49,8 +39,8 @@ data class PotraceParams(
     val alphaMax: Double = 1.0,
     val optimizeCurve: Boolean = true,
     val optTolerance: Double = 0.2,
-    val morphCloseRadius: Int = 2,         // 形态学闭运算半径（填充笔画内部小洞）
-    val polygonEpsilon: Double = 1.2       // 多边形拟合最大允许的平均垂直距离（像素）
+    val morphCloseRadius: Int = 0,         // 形态学闭运算半径（0 = 关闭，避免吃掉细笔画）
+    val rdpEpsilon: Double = 2.0           // RDP 简化容差（像素）。越大顶点越少，越小越精细
 )
 
 enum class TurnPolicy { BLACK, WHITE, LEFT, RIGHT, MINORITY, MAJORITY, RANDOM }
