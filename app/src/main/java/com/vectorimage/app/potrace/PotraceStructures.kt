@@ -34,14 +34,15 @@ class PotracePath(val points: List<IntPoint>) {
 }
 
 data class PotraceParams(
-    val turdSize: Int = 8,                 // 过滤面积小于该值的轮廓
+    val turdSize: Int = 8,                    // 过滤面积 < 该值的轮廓
     val turnPolicy: TurnPolicy = TurnPolicy.MINORITY,
     val alphaMax: Double = 1.0,
     val optimizeCurve: Boolean = true,
     val optTolerance: Double = 0.2,
-    val minComponentSize: Int = 20,        // 过滤小于该面积的孤立前景连通分量
-    val maxHoleSize: Int = 30,             // 填充小于该面积的内部孔洞
-    val rdpEpsilon: Double = 1.5           // RDP 简化容差（像素）
+    val minComponentSize: Int = 20,           // 过滤小于该面积的前景连通分量
+    val maxHoleSize: Int = 30,                // 填充小于该面积的内部孔洞
+    val rdpEpsilon: Double = 0.8,             // RDP 简化容差（像素）—— 调小可保留更多细节
+    val cornerAngleDeg: Double = 60.0         // 转角超过此角度视为角点（保留锐角）
 )
 
 enum class TurnPolicy { BLACK, WHITE, LEFT, RIGHT, MINORITY, MAJORITY, RANDOM }
