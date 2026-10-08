@@ -1,54 +1,113 @@
 package com.vectorimage.app.potrace
 
-import kotlin.math.abs
-import kotlin.math.hypot
-
-/**
- * 简化为 RDP（Douglas-Peucker）多边形简化。
- */
 object PolygonFitter {
 
-    fun fit(path: PotracePath) {
+    fun fit(path: PotracePath, params: PotraceParams) {
         val pts = path.points
-        if (pts.size < 3) {
-            path.optimalPolygon = emptyList()
-            return
-        }
-        path.optimalPolygon = rdp(pts, 1.5f)
-    }
-
-    private fun rdp(pts: List<IntPoint>, eps: Float): List<Int> {
         val n = pts.size
-        val keep = BooleanArray(n)
-        keep[0] = true
-        keep[n - 1] = true
-        rdpRec(pts, 0, n - 1, eps, keep)
-        return pts.indices.filter { keep[it] }
+        if (n < 3) { path.optimalPolygon = emptyList(); return }
+        path.sums = computePrefixSums(pts)
+        path.optimalPolygon = findBestPolygon(pts, path.sums, params.polygonEpsilon)
     }
 
-    private fun rdpRec(pts: List<IntPoint>, s: Int, e: Int, eps: Float, keep: BooleanArray) {
-        if (e <= s + 1) return
-        var maxD = 0f
-        var idx = -1
-        val a = pts[s]; val b = pts[e]
-        for (i in s + 1 until e) {
-            val d = perpDist(pts[i], a, b)
-            if (d > maxD) { maxD = d; idx = i }
+    /** 前缀和：x, y, x², xy, y² */
+    private fun computePrefixSums(pts: List<IntPoint>): List<Sum> {
+        val n = pts.size
+        val sums = ArrayList<Sum>(n + 1)
+        var sx = 0.0; var sy = 0.0; var sx2 = 0.0; var sxy = 0.0; var sy2 = 0.0
+        sums.add(Sum(0.0, 0.0, 0.0, 0.0, 0.0))
+        for (p in pts) {
+            sx += p.x; sy += p.y
+            sx2 += p.x.toDouble() * p.x
+            sxy += p.x.toDouble() * p.y
+            sy2 += p.y.toDouble() * p.y
+            sums.add(Sum(sx, sy, sx2, sxy, sy2))
         }
-        if (maxD > eps && idx > 0) {
-            keep[idx] = true
-            rdpRec(pts, s, idx, eps, keep)
-            rdpRec(pts, idx, e, eps, keep)
-        }
+        return sums
     }
 
-    private fun perpDist(p: IntPoint, a: IntPoint, b: IntPoint): Float {
-        val dx = (b.x - a.x).toFloat()
-        val dy = (b.y - a.y).toFloat()
-        val len = hypot(dx, dy)
-        if (len < 0.001f) {
-            return hypot((p.x - a.x).toFloat(), (p.y - a.y).toFloat())
+    /**
+     * Potrace 风格的惩罚函数：
+     * penalty(i, j) = (1/k) * Σ (p 到直线 (i, j) 的垂直距离)²
+     * 其中 k 是区间 [i, j] 内的点数。
+     *
+     * 利用 Σdx²、Σdy²、Σdx·dy 三个和，避免逐点遍历。
+     */
+    private fun penalty(pts: List<IntPoint>, sums: List<Sum>, i: Int, j: Int): Double {
+        val n = pts.size
+        val k = (j - i + n) % n
+        if (k < 2) return 0.0
+
+        val s = sums[j + 1] - sums[i]   // 区间 [i, j] 内所有点的和
+        val kd = k.toDouble()
+
+        val x0 = pts[i].x.toDouble()
+        val y0 = pts[i].y.toDouble()
+        val x1 = pts[j].x.toDouble()
+        val y1 = pts[j].y.toDouble()
+
+        val dx = x1 - x0
+        val dy = y1 - y0
+        val len2 = dx * dx + dy * dy
+        if (len2 < 1e-9) return 0.0
+
+        // Σ (p.x - x0)²
+        val sumDx2 = s.x2 - 2.0 * x0 * s.x + kd * x0 * x0
+        // Σ (p.y - y0)²
+        val sumDy2 = s.y2 - 2.0 * y0 * s.y + kd * y0 * y0
+        // Σ (p.x - x0)(p.y - y0)
+        val sumDxy = s.xy - x0 * s.y - y0 * s.x + kd * x0 * y0
+
+        // Σ (p 到直线的有向距离 × |line|)² = dx²·Σdy² - 2·dx·dy·Σdxdy + dy²·Σdx²
+        val sumD2 = dx * dx * sumDy2 - 2.0 * dx * dy * sumDxy + dy * dy * sumDx2
+
+        // 平均垂直距离平方 = sumD2 / (k * len2)
+        return sumD2 / (kd * len2)
+    }
+
+    /**
+     * 从最左点开始，每次找最远的可行点：
+     * 从 current 向前扩张，直到 penalty 超过 maxPenalty 为止。
+     */
+    private fun findBestPolygon(
+        pts: List<IntPoint>, sums: List<Sum>, maxPenalty: Double
+    ): List<Int> {
+        val n = pts.size
+        if (n < 3) return emptyList()
+
+        var start = 0
+        for (i in 1 until n) if (pts[i].x < pts[start].x) start = i
+
+        val polygon = mutableListOf<Int>()
+        var current = start
+        polygon.add(current)
+
+        var safety = 0
+        while (safety < n) {
+            safety++
+
+            var bestNext = -1
+            var next = (current + 2) % n
+            var iter = 0
+            while (next != start && iter < n) {
+                iter++
+                val p = penalty(pts, sums, current, next)
+                if (p <= maxPenalty) {
+                    bestNext = next   // 还能连，继续尝试更远
+                } else {
+                    break             // 太远，回退到上一个可行点
+                }
+                next = (next + 1) % n
+            }
+
+            // 太近也连不上（几乎不可能，防御性编程）
+            if (bestNext == -1) bestNext = (current + 1) % n
+
+            if (bestNext == start) break
+            polygon.add(bestNext)
+            current = bestNext
         }
-        return abs(dx * (p.y - a.y) - dy * (p.x - a.x)) / len
+
+        return polygon
     }
 }
