@@ -1,6 +1,6 @@
 package com.vectorimage.app.potrace
 
-import kotlin.math.*
+import kotlin.math.sqrt
 
 data class IntPoint(val x: Int, val y: Int)
 
@@ -34,13 +34,14 @@ class PotracePath(val points: List<IntPoint>) {
 }
 
 data class PotraceParams(
-    val turdSize: Int = 6,                 // 过滤小轮廓（面积 < turdSize 的丢弃）
+    val turdSize: Int = 8,                 // 过滤面积小于该值的轮廓
     val turnPolicy: TurnPolicy = TurnPolicy.MINORITY,
     val alphaMax: Double = 1.0,
     val optimizeCurve: Boolean = true,
     val optTolerance: Double = 0.2,
-    val morphCloseRadius: Int = 0,         // 形态学闭运算半径（0 = 关闭，避免吃掉细笔画）
-    val rdpEpsilon: Double = 2.0           // RDP 简化容差（像素）。越大顶点越少，越小越精细
+    val minComponentSize: Int = 20,        // 过滤小于该面积的孤立前景连通分量
+    val maxHoleSize: Int = 30,             // 填充小于该面积的内部孔洞
+    val rdpEpsilon: Double = 1.5           // RDP 简化容差（像素）
 )
 
 enum class TurnPolicy { BLACK, WHITE, LEFT, RIGHT, MINORITY, MAJORITY, RANDOM }
