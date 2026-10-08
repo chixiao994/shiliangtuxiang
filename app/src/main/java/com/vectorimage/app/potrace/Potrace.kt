@@ -17,7 +17,7 @@ object Potrace {
         val threshold = otsu(gray)
         var binary = BooleanArray(w * h) { gray[it] < threshold }
 
-        // ---- 形态学闭运算：填充笔画内部的小洞，去掉孤立噪点 ----
+        // 可选：形态学闭运算（默认关闭，避免吃掉书法字的细笔画）
         if (params.morphCloseRadius > 0) {
             var buf = binary
             repeat(params.morphCloseRadius) { buf = dilate3x3(buf, w, h) }
