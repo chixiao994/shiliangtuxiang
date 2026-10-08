@@ -15,12 +15,20 @@ object Potrace {
             ((p shr 16 and 0xFF) * 299 + (p shr 8 and 0xFF) * 587 + (p and 0xFF) * 114) / 1000
         }
         val threshold = otsu(gray)
-        val binary = BooleanArray(w * h) { gray[it] < threshold }
+        var binary = BooleanArray(w * h) { gray[it] < threshold }
+
+        // ---- 形态学闭运算：填充笔画内部的小洞，去掉孤立噪点 ----
+        if (params.morphCloseRadius > 0) {
+            var buf = binary
+            repeat(params.morphCloseRadius) { buf = dilate3x3(buf, w, h) }
+            repeat(params.morphCloseRadius) { buf = erode3x3(buf, w, h) }
+            binary = buf
+        }
 
         val paths = PathDecomposer.decompose(binary, w, h, params)
 
         for (path in paths) {
-            PolygonFitter.fit(path)
+            PolygonFitter.fit(path, params)
             CurveGenerator.generate(path, params)
             if (params.optimizeCurve) {
                 CurveOptimizer.optimize(path, params)
@@ -28,6 +36,45 @@ object Potrace {
         }
 
         return paths
+    }
+
+    private fun dilate3x3(src: BooleanArray, w: Int, h: Int): BooleanArray {
+        val dst = BooleanArray(src.size)
+        for (y in 0 until h) {
+            for (x in 0 until w) {
+                if (!src[y * w + x]) continue
+                for (dy in -1..1) {
+                    val ny = y + dy
+                    if (ny < 0 || ny >= h) continue
+                    for (dx in -1..1) {
+                        val nx = x + dx
+                        if (nx < 0 || nx >= w) continue
+                        dst[ny * w + nx] = true
+                    }
+                }
+            }
+        }
+        return dst
+    }
+
+    private fun erode3x3(src: BooleanArray, w: Int, h: Int): BooleanArray {
+        val dst = BooleanArray(src.size)
+        for (y in 0 until h) {
+            for (x in 0 until w) {
+                var allFg = true
+                outer@ for (dy in -1..1) {
+                    val ny = y + dy
+                    if (ny < 0 || ny >= h) { allFg = false; break }
+                    for (dx in -1..1) {
+                        val nx = x + dx
+                        if (nx < 0 || nx >= w) { allFg = false; break@outer }
+                        if (!src[ny * w + nx]) { allFg = false; break@outer }
+                    }
+                }
+                dst[y * w + x] = allFg
+            }
+        }
+        return dst
     }
 
     private fun otsu(gray: IntArray): Int {
